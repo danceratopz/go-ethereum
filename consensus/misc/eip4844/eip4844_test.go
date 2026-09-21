@@ -149,6 +149,65 @@ func TestCalcBlobFeePostOsaka(t *testing.T) {
 	}
 }
 
+func TestAmsterdamBPOTransitions(t *testing.T) {
+	for _, increase := range []bool{true, false} {
+		name := "BPODecrease"
+		blob := params.DefaultBPODecreaseBlobConfig
+		if increase {
+			name, blob = "BPOIncrease", params.DefaultBPOIncreaseBlobConfig
+		}
+		t.Run(name, func(t *testing.T) {
+			zero, transition := uint64(0), uint64(15_000)
+			config := *params.MergedTestChainConfig
+			config.BPO2Time, config.AmsterdamTime = &zero, &zero
+			config.BlobScheduleConfig = &params.BlobScheduleConfig{
+				Cancun: params.DefaultCancunBlobConfig,
+				Prague: params.DefaultPragueBlobConfig,
+				BPO2:   params.DefaultBPO2BlobConfig,
+			}
+			if increase {
+				config.BPOIncreaseTime, config.BlobScheduleConfig.BPOIncrease = &transition, blob
+			} else {
+				config.BPODecreaseTime, config.BlobScheduleConfig.BPODecrease = &transition, blob
+			}
+			if err := config.CheckConfigForkOrder(); err != nil {
+				t.Fatal(err)
+			}
+			for _, timestamp := range []uint64{transition - 1, transition, transition + 1} {
+				active := blob
+				if timestamp < transition {
+					active = params.DefaultBPO2BlobConfig
+				}
+				excess, used := uint64(10_000_000), uint64(21*params.BlobTxBlobGasPerBlob)
+				parent := &types.Header{
+					Number:        big.NewInt(1),
+					Time:          timestamp - 1,
+					ExcessBlobGas: &excess,
+					BlobGasUsed:   &used,
+					BaseFee:       big.NewInt(0), // Exercise the normal excess calculation.
+				}
+				// The parent's usage may exceed the decreased maximum; only the
+				// child must obey the new limit, and its excess uses the new target.
+				wantExcess := excess + used - uint64(active.Target)*params.BlobTxBlobGasPerBlob
+				maxGas := uint64(active.Max) * params.BlobTxBlobGasPerBlob
+				header := &types.Header{
+					Number:        big.NewInt(2),
+					Time:          timestamp,
+					ExcessBlobGas: &wantExcess,
+					BlobGasUsed:   &maxGas,
+				}
+				if err := VerifyEIP4844Header(&config, parent, header); err != nil {
+					t.Fatalf("timestamp %d: %v", timestamp, err)
+				}
+				maxGas += params.BlobTxBlobGasPerBlob
+				if err := VerifyEIP4844Header(&config, parent, header); err == nil {
+					t.Fatalf("timestamp %d: accepted more than %d blobs", timestamp, active.Max)
+				}
+			}
+		})
+	}
+}
+
 func TestFakeExponential(t *testing.T) {
 	tests := []struct {
 		factor      int64

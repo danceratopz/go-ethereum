@@ -207,7 +207,7 @@ func (api *ConsensusAPI) ForkchoiceUpdatedV3(ctx context.Context, update engine.
 			return engine.STATUS_INVALID, attributesErr("missing withdrawals")
 		case params.BeaconRoot == nil:
 			return engine.STATUS_INVALID, attributesErr("missing beacon root")
-		case !api.checkFork(params.Timestamp, forks.Cancun, forks.Prague, forks.Osaka, forks.BPO1, forks.BPO2):
+		case !api.checkFork(params.Timestamp, forks.Cancun, forks.Prague, forks.Osaka, forks.BPO1, forks.BPO2, forks.BPO3, forks.BPO4, forks.BPO5):
 			return engine.STATUS_INVALID, unsupportedForkErr("fcuV3 must only be called for cancun/prague/osaka payloads")
 		}
 	}
@@ -229,7 +229,7 @@ func (api *ConsensusAPI) ForkchoiceUpdatedV4(ctx context.Context, update engine.
 			return engine.STATUS_INVALID, attributesErr("missing beacon root")
 		case params.SlotNumber == nil:
 			return engine.STATUS_INVALID, attributesErr("missing slot number")
-		case !api.checkFork(params.Timestamp, forks.Amsterdam, forks.BPO3, forks.BPO4, forks.BPO5, forks.Bogota):
+		case !api.checkFork(params.Timestamp, forks.Amsterdam, forks.BPOIncrease, forks.BPODecrease, forks.Bogota):
 			return engine.STATUS_INVALID, unsupportedForkErr("fcuV4 must only be called for amsterdam payloads")
 		}
 	}
@@ -500,6 +500,9 @@ func (api *ConsensusAPI) GetPayloadV5(payloadID engine.PayloadID) (*engine.Execu
 			forks.Osaka,
 			forks.BPO1,
 			forks.BPO2,
+			forks.BPO3,
+			forks.BPO4,
+			forks.BPO5,
 		})
 }
 
@@ -512,9 +515,8 @@ func (api *ConsensusAPI) GetPayloadV6(payloadID engine.PayloadID) (*engine.Execu
 		[]engine.PayloadVersion{engine.PayloadV4},
 		[]forks.Fork{
 			forks.Amsterdam,
-			forks.BPO3,
-			forks.BPO4,
-			forks.BPO5,
+			forks.BPOIncrease,
+			forks.BPODecrease,
 			forks.Bogota,
 		})
 }
@@ -848,7 +850,7 @@ func (api *ConsensusAPI) NewPayloadV4(ctx context.Context, params engine.Executa
 		return invalidStatus, paramsErr("slotNumber not supported pre-amsterdam")
 	case params.BlockAccessList != nil:
 		return invalidStatus, paramsErr("block access list not supported pre-amsterdam")
-	case !api.checkFork(params.Timestamp, forks.Prague, forks.Osaka, forks.BPO1, forks.BPO2):
+	case !api.checkFork(params.Timestamp, forks.Prague, forks.Osaka, forks.BPO1, forks.BPO2, forks.BPO3, forks.BPO4, forks.BPO5):
 		return invalidStatus, unsupportedForkErr("newPayloadV4 must only be called for prague/osaka payloads")
 	}
 	requests := convertRequests(executionRequests)
@@ -881,7 +883,7 @@ func (api *ConsensusAPI) NewPayloadV5(ctx context.Context, params engine.Executa
 		// is present but does not decode (including the empty byte string) is
 		// not a params error, the payload is rejected as INVALID further down.
 		return invalidStatus, paramsErr("missing block access list post-amsterdam")
-	case !api.checkFork(params.Timestamp, forks.Amsterdam, forks.BPO3, forks.BPO4, forks.BPO5, forks.Bogota):
+	case !api.checkFork(params.Timestamp, forks.Amsterdam, forks.BPOIncrease, forks.BPODecrease, forks.Bogota):
 		return invalidStatus, unsupportedForkErr("newPayloadV5 must only be called for amsterdam payloads")
 	}
 	requests := convertRequests(executionRequests)

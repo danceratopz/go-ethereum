@@ -23,8 +23,62 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/params/forks"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAmsterdamBPOSchedules(t *testing.T) {
+	for _, test := range []struct {
+		fork forks.Fork
+		blob *BlobConfig
+		set  func(*ChainConfig, *uint64, *BlobConfig)
+	}{
+		{forks.BPOIncrease, DefaultBPOIncreaseBlobConfig, func(c *ChainConfig, at *uint64, blob *BlobConfig) {
+			c.BPOIncreaseTime, c.BlobScheduleConfig.BPOIncrease = at, blob
+		}},
+		{forks.BPODecrease, DefaultBPODecreaseBlobConfig, func(c *ChainConfig, at *uint64, blob *BlobConfig) {
+			c.BPODecreaseTime, c.BlobScheduleConfig.BPODecrease = at, blob
+		}},
+	} {
+		t.Run(test.fork.String(), func(t *testing.T) {
+			config := *MergedTestChainConfig
+			config.BPO2Time = newUint64(0)
+			config.AmsterdamTime = newUint64(100)
+			config.BlobScheduleConfig = &BlobScheduleConfig{
+				Cancun: DefaultCancunBlobConfig,
+				Prague: DefaultPragueBlobConfig,
+				BPO2:   DefaultBPO2BlobConfig,
+			}
+			test.set(&config, newUint64(200), test.blob)
+			require.NoError(t, config.CheckConfigForkOrder())
+			require.Equal(t, forks.BPO2, config.LatestFork(99))
+			require.Equal(t, forks.Amsterdam, config.LatestFork(199))
+			require.Equal(t, DefaultBPO2BlobConfig, config.BlobConfig(config.LatestFork(199)))
+			require.Equal(t, test.fork, config.LatestFork(200))
+			require.Equal(t, test.blob, config.BlobConfig(config.LatestFork(200)))
+			require.Equal(t, newUint64(200), config.Timestamp(test.fork))
+			require.True(t, config.Rules(big.NewInt(0), true, 200).IsAmsterdam)
+
+			// Changing an active schedule's activation time requires a rewind.
+			changed := config
+			test.set(&changed, newUint64(300), test.blob)
+			require.Nil(t, config.CheckCompatible(&changed, 0, 199))
+			err := config.CheckCompatible(&changed, 0, 200)
+			require.NotNil(t, err)
+			require.Equal(t, uint64(199), err.RewindToTime)
+
+			// Each synthetic schedule requires Amsterdam and its own parameters,
+			// but neither requires the other synthetic schedule.
+			config.AmsterdamTime = nil
+			require.ErrorContains(t, config.CheckConfigForkOrder(), "amsterdam not enabled")
+			config.AmsterdamTime = newUint64(201)
+			require.ErrorContains(t, config.CheckConfigForkOrder(), "unsupported fork ordering")
+			config.AmsterdamTime = newUint64(100)
+			test.set(&config, newUint64(200), nil)
+			require.ErrorContains(t, config.CheckConfigForkOrder(), "missing entry")
+		})
+	}
+}
 
 func TestCheckCompatible(t *testing.T) {
 	type test struct {

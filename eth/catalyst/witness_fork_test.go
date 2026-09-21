@@ -150,6 +150,21 @@ func TestWitnessAPIsAcrossForks(t *testing.T) {
 		t.Run(fork.name, func(t *testing.T) {
 			testWitnessRoundtrip(t, fork)
 		})
+		for _, bpo := range bpoTestForks {
+			// Osaka uses the same witness endpoints as Prague.
+			if bpo.base != fork.name && !(bpo.base == "osaka" && fork.name == "prague") {
+				continue
+			}
+			t.Run(bpo.name, func(t *testing.T) {
+				variant := fork
+				variant.activate = func(cfg *params.ChainConfig, at uint64) {
+					fork.activate(cfg, at)
+					cfg.OsakaTime = &at
+					bpo.activate(cfg, at)
+				}
+				testWitnessRoundtrip(t, variant)
+			})
+		}
 	}
 }
 
@@ -160,8 +175,9 @@ func testWitnessRoundtrip(t *testing.T, fork witnessFork) {
 	// the first one under it. Only the config is touched here: it is not part of
 	// the genesis hash, so the already-generated blocks still chain onto it.
 	forkTime := blocks[len(blocks)-2].Time() + 5
+	blobSchedule := *params.DefaultBlobSchedule
+	genesis.Config.BlobScheduleConfig = &blobSchedule
 	fork.activate(genesis.Config, forkTime)
-	genesis.Config.BlobScheduleConfig = params.DefaultBlobSchedule
 
 	n, ethservice := startEthService(t, genesis, blocks[:9])
 	defer n.Close()

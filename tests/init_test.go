@@ -31,7 +31,53 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/params/forks"
 )
+
+func TestBPOForkConfigs(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		fork      forks.Fork
+		amsterdam bool
+		at        uint64
+	}{
+		{"BPO3", forks.BPO3, false, 0},
+		{"BPO4", forks.BPO4, false, 0},
+		{"BPO2ToBPO3AtTime15k", forks.BPO3, false, 15_000},
+		{"BPO3ToBPO4AtTime15k", forks.BPO4, false, 15_000},
+		{"BPOIncrease", forks.BPOIncrease, true, 0},
+		{"BPODecrease", forks.BPODecrease, true, 0},
+		{"AmsterdamToBPOIncreaseAtTime15k", forks.BPOIncrease, true, 15_000},
+		{"AmsterdamToBPODecreaseAtTime15k", forks.BPODecrease, true, 15_000},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config, _, err := GetChainConfig(test.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := config.CheckConfigForkOrder(); err != nil {
+				t.Fatal(err)
+			}
+			if have := config.LatestFork(test.at); have != test.fork {
+				t.Fatalf("active fork = %v, want %v", have, test.fork)
+			}
+			if have := config.IsAmsterdam(config.LondonBlock, test.at); have != test.amsterdam {
+				t.Fatalf("Amsterdam active = %v, want %v", have, test.amsterdam)
+			}
+			if test.amsterdam {
+				if config.BPO3Time != nil || config.BPO4Time != nil {
+					t.Fatal("Amsterdam schedule enables a legacy BPO test fork")
+				}
+				if config.BPOIncreaseTime != nil && config.BPODecreaseTime != nil {
+					t.Fatal("Amsterdam schedules must be independently selectable")
+				}
+				if test.at > 0 && config.LatestFork(test.at-1) != forks.Amsterdam {
+					t.Fatal("synthetic BPO transition must start from Amsterdam")
+				}
+			}
+		})
+	}
+}
 
 var (
 	baseDir                         = filepath.Join(".", "testdata")

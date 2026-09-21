@@ -128,6 +128,30 @@ var engineForks = []engineFork{
 	},
 }
 
+// bpoTestForks exercise both the legacy Osaka schedules and the independent
+// Amsterdam schedules through the Engine API versions of their base fork.
+var bpoTestForks = []struct {
+	name, base string
+	activate   func(*params.ChainConfig, uint64)
+}{
+	{"bpo3", "osaka", func(cfg *params.ChainConfig, at uint64) {
+		cfg.BPO3Time = &at
+		cfg.BlobScheduleConfig.BPO3 = params.DefaultBPO3BlobConfig
+	}},
+	{"bpo4", "osaka", func(cfg *params.ChainConfig, at uint64) {
+		cfg.BPO4Time = &at
+		cfg.BlobScheduleConfig.BPO4 = params.DefaultBPO4BlobConfig
+	}},
+	{"bpoIncrease", "amsterdam", func(cfg *params.ChainConfig, at uint64) {
+		cfg.BPOIncreaseTime = &at
+		cfg.BlobScheduleConfig.BPOIncrease = params.DefaultBPOIncreaseBlobConfig
+	}},
+	{"bpoDecrease", "amsterdam", func(cfg *params.ChainConfig, at uint64) {
+		cfg.BPODecreaseTime = &at
+		cfg.BlobScheduleConfig.BPODecrease = params.DefaultBPODecreaseBlobConfig
+	}},
+}
+
 // TestEngineAPIAcrossForks drives every fork through the block lifecycle the
 // consensus client performs: forkchoiceUpdated starts a build, getPayload
 // collects it, newPayload imports it, and a second forkchoiceUpdated makes it
@@ -137,6 +161,19 @@ func TestEngineAPIAcrossForks(t *testing.T) {
 		t.Run(fork.name, func(t *testing.T) {
 			testEngineRoundtrip(t, fork)
 		})
+		for _, bpo := range bpoTestForks {
+			if bpo.base != fork.name {
+				continue
+			}
+			t.Run(bpo.name, func(t *testing.T) {
+				variant := fork
+				variant.activate = func(cfg *params.ChainConfig, at uint64) {
+					fork.activate(cfg, at)
+					bpo.activate(cfg, at)
+				}
+				testEngineRoundtrip(t, variant)
+			})
+		}
 	}
 }
 
@@ -147,8 +184,18 @@ func testEngineRoundtrip(t *testing.T, fork engineFork) {
 	// the first one under it. Only the config is touched here: it is not part of
 	// the genesis hash, so the already-generated blocks still chain onto it.
 	forkTime := blocks[len(blocks)-2].Time() + 5
+	blobSchedule := *params.DefaultBlobSchedule
+	genesis.Config.BlobScheduleConfig = &blobSchedule
 	fork.activate(genesis.Config, forkTime)
-	genesis.Config.BlobScheduleConfig = params.DefaultBlobSchedule
+	wantVersion := engine.PayloadV3
+	if fork.slotAndGas {
+		wantVersion = engine.PayloadV4
+	} else if !fork.beaconRoot {
+		wantVersion = engine.PayloadV2
+	}
+	if have := payloadVersion(genesis.Config, forkTime); have != wantVersion {
+		t.Fatalf("simulated beacon payload version = %v, want %v", have, wantVersion)
+	}
 
 	n, ethservice := startEthService(t, genesis, blocks[:9])
 	defer n.Close()
